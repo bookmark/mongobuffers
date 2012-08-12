@@ -15,12 +15,16 @@ class Field(object):
             
             info(str): optional - A place to store a comment or note about the field.
     '''
-    def __init__(self, id, type=None, required=False, repeated=False, info=None):
+    def __init__(self, id, type=None, default=None, required=False, repeated=False, info=None):
         self.id = id
         self.type = type
         self.required = required
         self.info = info
         self.repeated = repeated
+        self.default = default
+        
+    def get_default(self):
+        return self.default
         
     def get_id(self):
         ''' Returns the fields id.

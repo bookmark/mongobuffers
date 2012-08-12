@@ -7,38 +7,74 @@ from mongobuffers.field import Field
     
 class ModelType(type):
     def __init__(cls, name, bases, dict):
+        # mangle the class
+        # remove any fields so that __setattr__/__getattr__ work in instances
+        fields = {}
+        for k,v in dict.iteritems():
+            if isinstance(v, Field):
+                fields[k] = v
+                delattr(cls, k)
+                continue
+            
         type.__init__(cls, name, bases, dict)
         
+        #print "CLASS DICT", cls.__dict__
+        # index the fields
         cls.map_name_to_field = {}
         cls.map_id_to_field = {}
         
-        for k,v in dict.iteritems():
-            
-            if not isinstance(v, Field):
-                continue
-                
+        for k,v in fields.iteritems():
             cls.map_name_to_field[k] = v
             cls.map_id_to_field[v.get_id()] = v
-        print cls.map_id_to_field
+        #print cls.map_id_to_field
        
 class Model(object):
     __metaclass__ = ModelType
-    collection = ''
+    _collection = ''
+    _database = None
+    _data = None
     
+    __reserved__ = ['_data','get_id', '_has_field', '_get_field', '_get_field_by_id',
+    'get_field_id', '_set_field', 'get', 'set', '_prepare_for_storage', 'spec', 'set','set_immediate_multi','set_immediate',
+    'save','_collection','database','connect','serialize','set_database','get_database','get_collection','get_collection_name'
+    ]
     def __init__(self, data=None, **kwargs):
         if data is None:
-            self.data = {}
+            self._data = {}
             return
             
         if isinstance(data, dict):
-            self.data = {}
+            self._data = {}
             for k,v in data.iteritems():
                 if isinstance(k, int):
                     k = str(k)
-                self.data[k] = v
+                self._data[k] = v
         else:
-            self.data = kwargs
-    
+            self._data = kwargs
+            
+    def get_id(self):
+        return self._data.get('_id', None)
+     
+    def __setitem__(self, name, value):
+        ''' Used by mongo. Do not use Model[]. '''
+        return self._data.__setitem__(name, value)
+        
+    def __setattr__(self, name, value):
+        if name in self.__reserved__:
+            self.__dict__[name] = value
+            return
+        
+        self.set(name, value)
+        
+    def __getattr__(self, name):
+        if name in self.__reserved__:
+            return self.__dict__[name]
+        
+        val = self.get(name)        
+        
+        print "GETATTR",name, val
+        return val
+        
     @classmethod  
     def _has_field(self, name):
         return name in self.map_name_to_field
@@ -61,9 +97,7 @@ class Model(object):
         field = self._get_field(name)
         self[field.get_tag()] = value
         
-    def get_id(self):
-        return self.data.get('_id', None)
-        
+       
     def get(self, name):
         if not self._has_field(name):
             raise UndefinedFieldError("Field %s not defined." % name)
@@ -72,32 +106,34 @@ class Model(object):
         field_id = field.get_id()
         field_type = field.get_type()
         field_repeats = field.get_repeated()
+        field_default = field.get_default()
         
         if field.required is True:
             # ensure required are set
-            if field_id not in self.data:
+            if field_id not in self._data:
                 raise Exception("Required field %s not set in model %s (id:%s)" % (name, self.__class__.__name__, self.get_id()))
                 
-            val = self.data.get(field_id)
+            val = self._data.get(field_id)
             if isinstance(val, dict) and Model in field_type.__mro__:
                 val = field_type(val)
             
         #print "Get", name, "Actual id", field_id
         
-        if field_id not in self.data:
+        if field_id not in self._data:
             if field_repeats:
                 return []
                 
-            return field_type()
+            # result a default value
+            return field_default
          
-        val = self.data.get(field_id)
+        val = self._data.get(field_id)
         
         if isinstance(val, dict) and isinstance(field_type, (type, types.ClassType)):
             val = field_type(val)
         return val
         
         
-    def prepare_for_storage(self, name, field, value):
+    def _prepare_for_storage(self, name, field, value):
         field_id = field.get_id()
         field_type = field.get_type()
         field_repeats = field.get_repeated()
@@ -163,7 +199,9 @@ class Model(object):
         field_type = field.get_type()
         field_repeats = field.get_repeated()
         
-        self.data[field_id] = self.prepare_for_storage(name, field, value)
+        val = self._prepare_for_storage(name, field, value)
+        self._data[field_id] = val
+        return val
         
     def set_immediate_multi(self, names, values):
         ''' Immediately set multiple fields at the same.
@@ -177,12 +215,11 @@ class Model(object):
         _values = []
         
         for name, value in zip(names, values):
-            if not self._has_field(name):
-                raise UndefinedFieldError("Field %s not defined." % name)
-            
+            # set in memory first
+            self.set(name, value)
             field = self._get_field(name)
             _field_ids.append(field.get_id())
-            _values.append(self.prepare_for_storage(name, field, value))
+            _values.append(self._prepare_for_storage(name, field, value))
         
         update_dict = dict(zip(_field_ids, _values))
         
@@ -206,13 +243,12 @@ class Model(object):
                 
                 value: A field value
         '''
+        # set in memory first
+        self.set(name, value)
         
-        if not self._has_field(name):
-            raise UndefinedFieldError("Field %s not defined." % name)
-            
         field = self._get_field(name)
         
-        value = self.prepare_for_storage(name, field, value)
+        value = self._prepare_for_storage(name, field, value)
             
         update_dict = {field.get_id(): value}
         
@@ -226,19 +262,19 @@ class Model(object):
         self.get_collection().update(match_options, set_options, safe=True)    
     
     def save(self):
-        id = self.get_collection().save(self.data, safe=True)
+        id = self.get_collection().save(self._data, safe=True)
         
         # store the id back
         if self.get_id() is None:
-            self.data['_id'] = id
+            self._data['_id'] = id
             
         return id
         
     @classmethod
     def get_collection_name(self):
-        if not self.collection:
-            raise Exception("Collection name not defined on class %s" % self.__class__.__name__)
-        return self.collection
+        if not self._collection:
+            raise Exception("Collection name not defined on class %s" % self.__name__)
+        return self._collection
         
     @classmethod
     def get_collection(self):
@@ -246,11 +282,11 @@ class Model(object):
         
     @classmethod
     def get_database(self):
-        return self.database
+        return self._database
       
     @classmethod
     def set_database(cls, database):
-        cls.database = database
+        cls._database = database
         
     @classmethod
     def connect(cls, database):
@@ -266,4 +302,4 @@ class Model(object):
         return cls_copy
         
     def serialize(self):
-        return self.data
+        return self._data

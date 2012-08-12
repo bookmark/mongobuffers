@@ -20,7 +20,7 @@ def main():
         download_url="http://code.google.com/p/mongobuffers/downloads/list",
         license="Apache License (2.0)",
         packages=find_packages(),
-        install_requires=['pymongo'],
+        install_requires=['pymongo', 'sphinx'],
         data_files=[],
         package_dir={'mongobuffers': 'mongobuffers'},
         classifiers=[

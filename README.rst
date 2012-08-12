@@ -19,7 +19,7 @@ An example Model with submodel::
     import datetime
     from mongobuffers.api import Model, Field
     
-	class TestSubModel(Model):
+    class TestSubModel(Model):
         title = Field(1, type=str, required=False)
         text = Field(2, type=str, required=False)
         tags = Field(3, type=str, required=False, repeated=True)
