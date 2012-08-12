@@ -1,0 +1,3 @@
+class UndefinedFieldError(Exception):
+    pass
+
