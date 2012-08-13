@@ -141,7 +141,7 @@ class Model(object):
         if field_repeats:
             # repeatable fields must be lists
             if not isinstance(value, list):
-                raise ValueError("Cannot set %s. Value must be a list of %s" % (name, field_type))
+                raise ValueError("Cannot set %s. Value must be a list of %s. Got %s: %s" % (name, field_type, type(value), value))
             
             # validate each of the lists values
             for i, v in enumerate(value):
@@ -191,6 +191,9 @@ class Model(object):
                 
         
     def set(self, name, value):
+        if value is None:
+            return
+            
         if not self._has_field(name):
             raise UndefinedFieldError("Field %s not defined." % name)
         
@@ -301,5 +304,8 @@ class Model(object):
         
         return cls_copy
         
-    def serialize(self):
+    def serialize(self, symbolic=False):
+        if symbolic:
+            raise NotImplementedError
+            
         return self._data
